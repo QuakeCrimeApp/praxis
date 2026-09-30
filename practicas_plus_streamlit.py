@@ -645,11 +645,11 @@ if resultado is not None:
 
     def colorear(row):
         if row["Estado"] == "asignado" and str(row["Preferencia"]) in ("1", "1.0"):
-            color = "background-color: #d4f4dd"
+            estilo = "background-color: #d4f4dd; color: #000000;"
         elif row["Estado"] == "asignado":
-            color = "background-color: #fff3cd"
+            estilo = "background-color: #fff3cd; color: #000000;"
         else:
-            color = "background-color: #f8d7da"
+             estilo = "background-color: #f8d7da; color: #000000;"
         return [color] * len(row)
 
     st.subheader("Resultados")
