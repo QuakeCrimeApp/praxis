@@ -23,13 +23,12 @@ Diego J. Maldonado Guzmán
 
 import os
 import re
-import traceback
 from pathlib import Path
+from io import BytesIO
 
 import pandas as pd
+import streamlit as st
 
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
 
 # =========================================================
 # CONFIG
@@ -75,51 +74,25 @@ def clean_col(x):
 # LEER EXCEL
 # =========================================================
 
-def leer_excel(path):
-
-    if path is None:
+def leer_excel(source):
+    if source is None:
         raise Exception("No se seleccionó archivo.")
-
-    # Streamlit entrega un UploadedFile; también mantenemos compatibilidad con rutas.
-    if hasattr(path, "name") and hasattr(path, "read"):
-        ext = Path(path.name).suffix.lower()
-        source = path
-    else:
-        if not os.path.exists(path):
-            raise Exception(f"No existe:\n{path}")
-        ext = Path(path).suffix.lower()
-        source = path
-
-    if ext != ".xlsx":
-        raise Exception("Solo se permiten archivos Excel .xlsx.")
-
     try:
-
-        df = pd.read_excel(
-            source,
-            keep_default_na=False,
-            engine="openpyxl"
-        )
-
+        if isinstance(source, (str, Path)):
+            path = Path(source)
+            if not path.exists():
+                raise Exception(f"No existe:\n{path}")
+            df = pd.read_excel(path, keep_default_na=False, engine="openpyxl")
+        else:
+            if hasattr(source, "seek"):
+                source.seek(0)
+            df = pd.read_excel(source, keep_default_na=False, engine="openpyxl")
     except Exception as e:
-
-        raise Exception(
-            f"No se pudo leer Excel:\n{e}"
-        )
-
-    # limpiar columnas
-
-    df.columns = [
-        clean_col(c)
-        for c in df.columns
-    ]
-
-    df = df.where(
-        pd.notnull(df),
-        ""
-    )
-
+        raise Exception(f"No se pudo leer Excel:\n{e}")
+    df.columns = [clean_col(c) for c in df.columns]
+    df = df.where(pd.notnull(df), "")
     return df.astype(str)
+
 
 # =========================================================
 # UTILIDADES
@@ -594,93 +567,108 @@ def asignar(
     return pd.DataFrame(out)
 
 
-import io
-import streamlit as st
-from openpyxl.styles import PatternFill, Font
+# =========================================================
+# INTERFAZ STREAMLIT
+# =========================================================
+st.set_page_config(page_title="PRAXIS", page_icon="🎓", layout="wide")
 
-st.set_page_config(page_title=APP_NAME, page_icon="🎓", layout="wide")
-
-st.title("🎓 PRÁCTICA+")
-st.caption("Sistema inteligente de asignación de prácticas · Desarrollado por Diego J. Maldonado Guzmán")
+st.title("🎓 PRAXIS")
+st.subheader("Sistema inteligente de asignación de prácticas")
+st.caption("Desarrollado por Diego J. Maldonado Guzmán")
 
 with st.sidebar:
-    st.header("Archivos")
-    students_file = st.file_uploader("Alumnos (.xlsx)", type=["xlsx"], key="students")
-    places_file = st.file_uploader("Plazas (.xlsx)", type=["xlsx"], key="places")
-    prefer_morning = st.checkbox("Preferir mañana cuando el turno sea indiferente", value=True)
-    run_clicked = st.button("▶ Ejecutar asignación", type="primary", use_container_width=True)
-
-st.info("Sube los dos Excel y pulsa **Ejecutar asignación**. Los archivos se procesan durante la sesión de la app.")
+    st.header("Configuración")
+    alumnos = st.file_uploader("Archivo de alumnos", type=["xlsx"])
+    plazas_file = st.file_uploader("Archivo de plazas", type=["xlsx"])
+    prefer_morning = st.checkbox("Preferir turno de mañana", value=True)
+    ejecutar = st.button(
+        "▶ Ejecutar asignación",
+        type="primary",
+        use_container_width=True,
+        disabled=not (alumnos and plazas_file),
+    )
 
 if "resultado" not in st.session_state:
     st.session_state.resultado = None
+if "excel" not in st.session_state:
+    st.session_state.excel = None
 
-if run_clicked:
-    if students_file is None or places_file is None:
-        st.error("Debes subir el Excel de alumnos y el Excel de plazas.")
-    else:
-        try:
-            df_s = leer_excel(students_file)
-            df_p = leer_excel(places_file)
+if ejecutar:
+    try:
+        with st.spinner("Calculando asignaciones..."):
+            df_s = leer_excel(alumnos)
+            df_p = leer_excel(plazas_file)
             plazas, alias, ocupacion = preparar_plazas(df_p)
-            resultado = asignar(df_s, plazas, alias, ocupacion, prefer_morning)
+            resultado = asignar(df_s.copy(), plazas, alias, ocupacion, prefer_morning)
+
+            output = BytesIO()
+            from openpyxl.styles import PatternFill, Font
+            with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                resultado.to_excel(writer, sheet_name="Asignaciones", index=False)
+                ws = writer.book["Asignaciones"]
+                fill_ok = PatternFill("solid", fgColor="C6EFCE")
+                fill_warn = PatternFill("solid", fgColor="FFF2CC")
+                fill_bad = PatternFill("solid", fgColor="F8D7DA")
+                for cell in ws[1]:
+                    cell.font = Font(bold=True)
+                for row in ws.iter_rows(min_row=2):
+                    estado, pref = row[-1].value, row[-2].value
+                    fill = fill_ok if estado == "asignado" and pref == 1 else (
+                        fill_warn if estado == "asignado" else fill_bad
+                    )
+                    for cell in row:
+                        cell.fill = fill
+                for cells in ws.columns:
+                    ancho = max(len(str(c.value or "")) for c in cells) + 2
+                    ws.column_dimensions[cells[0].column_letter].width = min(max(ancho, 10), 45)
+
             st.session_state.resultado = resultado
-        except Exception as e:
-            st.session_state.resultado = None
-            st.exception(e)
+            st.session_state.excel = output.getvalue()
+        st.success("Asignación completada.")
+    except Exception as e:
+        st.session_state.resultado = None
+        st.session_state.excel = None
+        st.error(f"Error: {e}")
 
 resultado = st.session_state.resultado
 if resultado is not None:
     total = len(resultado)
-    ok = int((resultado["Estado"] == "asignado").sum())
-    first = int(((resultado["Estado"] == "asignado") & (resultado["Preferencia"] == 1)).sum())
+    asignados = int((resultado["Estado"] == "asignado").sum())
+    primera = int(((resultado["Estado"] == "asignado") &
+                   (pd.to_numeric(resultado["Preferencia"], errors="coerce") == 1)).sum())
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Alumnos", total)
-    c2.metric("Asignados", ok)
-    c3.metric("1.ª preferencia", first)
-    c4.metric("Sin plaza", total - ok)
+    a, b, c, d = st.columns(4)
+    a.metric("Alumnos", total)
+    b.metric("Asignados", asignados)
+    c.metric("Sin plaza", total - asignados)
+    d.metric("1.ª preferencia", primera)
 
-    def marcar_fila(row):
-        if row["Estado"] == "asignado" and row["Preferencia"] == 1:
-            return ["background-color: #d4f4dd"] * len(row)
-        if row["Estado"] == "asignado":
-            return ["background-color: #fff3cd"] * len(row)
-        return ["background-color: #f8d7da"] * len(row)
+    def colorear(row):
+        if row["Estado"] == "asignado" and str(row["Preferencia"]) in ("1", "1.0"):
+            color = "background-color: #d4f4dd"
+        elif row["Estado"] == "asignado":
+            color = "background-color: #fff3cd"
+        else:
+            color = "background-color: #f8d7da"
+        return [color] * len(row)
 
-    st.subheader("Resultado")
-    st.dataframe(resultado.style.apply(marcar_fila, axis=1), use_container_width=True, hide_index=True)
-
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        resultado.to_excel(writer, sheet_name="Asignaciones", index=False)
-        ws = writer.book["Asignaciones"]
-        fill_ok = PatternFill("solid", fgColor="C6EFCE")
-        fill_warn = PatternFill("solid", fgColor="FFF2CC")
-        fill_bad = PatternFill("solid", fgColor="F8D7DA")
-        bold = Font(bold=True)
-        for cell in ws[1]:
-            cell.font = bold
-        for row in ws.iter_rows(min_row=2):
-            estado = row[-1].value
-            pref = row[-2].value
-            if estado == "asignado" and pref == 1:
-                fill = fill_ok
-            elif estado == "asignado":
-                fill = fill_warn
-            else:
-                fill = fill_bad
-            for cell in row:
-                cell.fill = fill
-        for column_cells in ws.columns:
-            max_len = max(len(str(c.value or "")) for c in column_cells)
-            ws.column_dimensions[column_cells[0].column_letter].width = min(max(max_len + 2, 10), 45)
-    output.seek(0)
+    st.subheader("Resultados")
+    st.dataframe(resultado.style.apply(colorear, axis=1),
+                 use_container_width=True, hide_index=True, height=520)
 
     st.download_button(
-        "📊 Descargar asignaciones.xlsx",
-        data=output.getvalue(),
-        file_name="asignaciones.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
+        "📥 Descargar asignaciones.xlsx",
+        st.session_state.excel,
+        "asignaciones.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type="primary",
     )
+else:
+    st.info("Sube los archivos de alumnos y plazas desde la barra lateral para comenzar.")
+    st.markdown("""
+**Columnas de alumnos:** `idalumno`, `apellido`, `nombre`, `perfil`, `notamedia`,
+`preferencia1`, `preferencia1turno`, `preferencia2`, `preferencia2turno`...
+
+**Columnas de plazas:** `idplaza`, `nombreplaza`, `capacidadmanana`, `capacidadtarde`
+y opcionalmente `perfilesadmitidos`.
+""")
