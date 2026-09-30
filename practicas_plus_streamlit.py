@@ -631,44 +631,98 @@ if ejecutar:
         st.error(f"Error: {e}")
 
 resultado = st.session_state.resultado
+
 if resultado is not None:
     total = len(resultado)
-    asignados = int((resultado["Estado"] == "asignado").sum())
-    primera = int(((resultado["Estado"] == "asignado") &
-                   (pd.to_numeric(resultado["Preferencia"], errors="coerce") == 1)).sum())
+
+    asignados = int(
+        (resultado["Estado"] == "asignado").sum()
+    )
+
+    primera = int(
+        (
+            (resultado["Estado"] == "asignado")
+            &
+            (
+                pd.to_numeric(
+                    resultado["Preferencia"],
+                    errors="coerce"
+                ) == 1
+            )
+        ).sum()
+    )
+
+    # ==========================================
+    # MÉTRICAS
+    # ==========================================
 
     a, b, c, d = st.columns(4)
+
     a.metric("Alumnos", total)
     b.metric("Asignados", asignados)
     c.metric("Sin plaza", total - asignados)
     d.metric("1.ª preferencia", primera)
 
+    # ==========================================
+    # COLORES DE LA TABLA
+    # ==========================================
+
     def colorear(row):
-        if row["Estado"] == "asignado" and str(row["Preferencia"]) in ("1", "1.0"):
-            estilo = "background-color: #d4f4dd; color: #000000;"
+
+        # Primera preferencia → VERDE
+        if (
+            row["Estado"] == "asignado"
+            and str(row["Preferencia"]) in ("1", "1.0")
+        ):
+            estilo = (
+                "background-color: #d4f4dd; "
+                "color: #000000;"
+            )
+
+        # Otras preferencias → AMARILLO
         elif row["Estado"] == "asignado":
-            estilo = "background-color: #fff3cd; color: #000000;"
+
+            estilo = (
+                "background-color: #fff3cd; "
+                "color: #000000;"
+            )
+
+        # Sin plaza → ROJO
         else:
-             estilo = "background-color: #f8d7da; color: #000000;"
-        return [color] * len(row)
+
+            estilo = (
+                "background-color: #f8d7da; "
+                "color: #000000;"
+            )
+
+        return [estilo] * len(row)
+
+    # ==========================================
+    # RESULTADOS
+    # ==========================================
 
     st.subheader("Resultados")
-    st.dataframe(resultado.style.apply(colorear, axis=1),
-                 use_container_width=True, hide_index=True, height=520)
+
+    tabla_estilizada = resultado.style.apply(
+        colorear,
+        axis=1
+    )
+
+    st.dataframe(
+        tabla_estilizada,
+        use_container_width=True,
+        hide_index=True,
+        height=520
+    )
+
+    # ==========================================
+    # DESCARGAR EXCEL
+    # ==========================================
 
     st.download_button(
         "📥 Descargar asignaciones.xlsx",
         st.session_state.excel,
         "asignaciones.xlsx",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        type="primary",
+        type="primary"
     )
-else:
-    st.info("Sube los archivos de alumnos y plazas desde la barra lateral para comenzar.")
-    st.markdown("""
-**Columnas de alumnos:** `idalumno`, `apellido`, `nombre`, `perfil`, `notamedia`,
-`preferencia1`, `preferencia1turno`, `preferencia2`, `preferencia2turno`...
-
-**Columnas de plazas:** `idplaza`, `nombreplaza`, `capacidadmanana`, `capacidadtarde`
-y opcionalmente `perfilesadmitidos`.
-""")
