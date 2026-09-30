@@ -17,10 +17,20 @@
 ✔ Exportación Excel
 ✔ Corrección definitiva preferencias
 
-Desarrollado por:
-Diego J. Maldonado Guzmán 
-Profesor del área de Derecho Penal de la Universidad de Málaga
-Investigador del Instituto Andaluz Interuniversitario de Criminología - Sección Málaga
+st.markdown("""
+<div style="
+    margin-top: 25px;
+    padding: 15px 20px;
+    border-top: 1px solid #cccccc;
+    font-size: 14px;
+    line-height: 1.6;
+">
+    <strong>Desarrollado por:</strong><br>
+    <strong>Diego J. Maldonado Guzmán</strong><br>
+    Profesor del Área de Derecho Penal de la Universidad de Málaga<br>
+    Investigador del Instituto Andaluz Interuniversitario de Criminología – Sección Málaga
+</div>
+""", unsafe_allow_html=True)
 
 """
 
