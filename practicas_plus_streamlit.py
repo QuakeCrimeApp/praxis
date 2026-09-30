@@ -18,7 +18,9 @@
 ✔ Corrección definitiva preferencias
 
 Desarrollado por:
-Diego J. Maldonado Guzmán
+Diego J. Maldonado Guzmán 
+Profesor del área de Derecho Penal de la Universidad de Málaga
+Investigador del Instituto Andaluz Interuniversitario de Criminología - Sección Málaga
 """
 
 import os
