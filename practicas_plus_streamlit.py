@@ -2,51 +2,17 @@
 # -*- coding: utf-8 -*-
 
 """
-PRÁCTICA+
+PRAXIS
 Sistema inteligente de asignación de prácticas
+
+Desarrollado por:
+Diego J. Maldonado Guzmán
+Profesor del Área de Derecho Penal de la Universidad de Málaga
+Investigador del Instituto Andaluz Interuniversitario de Criminología - Sección Málaga
 """
 
-import streamlit as st
-import pandas as pd
-
-# ==============================
-# TODO TU PROGRAMA
-# ==============================
-
-# ...
-# ...
-# ...
-
-st.download_button(
-    "📥 Descargar asignaciones.xlsx",
-    st.session_state.excel,
-    "asignaciones.xlsx",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    type="primary"
-)
-
-# ==============================
-# CRÉDITOS
-# ==============================
-
-st.markdown("""
-<div style="
-    margin-top: 35px;
-    padding: 15px 20px;
-    border-top: 1px solid #cccccc;
-    text-align: center;
-    font-size: 14px;
-    line-height: 1.6;
-">
-    <strong>Desarrollado por:</strong><br>
-    <strong>Diego J. Maldonado Guzmán</strong><br>
-    Profesor del Área de Derecho Penal de la Universidad de Málaga<br>
-    Investigador del Instituto Andaluz Interuniversitario de Criminología – Sección Málaga
-</div>
-""", unsafe_allow_html=True)
-
-import os
 import re
+import unicodedata
 from pathlib import Path
 from io import BytesIO
 
@@ -55,36 +21,41 @@ import streamlit as st
 
 
 # =========================================================
-# CONFIG
+# CONFIGURACIÓN
 # =========================================================
 
-APP_NAME = "PRÁCTICA+"
+APP_NAME = "PRAXIS"
 
 COL = {
-
-    # alumnos
+    # Alumnos
     "id": "idalumno",
     "apellido": "apellido",
     "nombre": "nombre",
     "perfil": "perfil",
     "nota": "notamedia",
 
-    # plazas
+    # Plazas
     "pid": "idplaza",
     "pname": "nombreplaza",
-
     "cm": "capacidadmanana",
     "ct": "capacidadtarde",
-
-    "profiles": "perfilesadmitidos"
+    "profiles": "perfilesadmitidos",
 }
 
+
 # =========================================================
-# NORMALIZAR COLUMNAS
+# NORMALIZACIÓN DE TEXTO
 # =========================================================
 
 def clean_col(x):
+    """
+    Normaliza los nombres de las columnas.
 
+    Ejemplos:
+    'Nota media' -> 'notamedia'
+    'Preferencia 1' -> 'preferencia1'
+    'Preferencia_1_turno' -> 'preferencia1turno'
+    """
     return (
         str(x)
         .strip()
@@ -94,27 +65,71 @@ def clean_col(x):
         .replace("-", "")
     )
 
+
+def normalizar_texto(x):
+    """
+    Normaliza texto para comparar nombres de plazas:
+    - minúsculas
+    - elimina tildes
+    - elimina espacios repetidos
+    """
+    texto = str(x).strip().lower()
+
+    texto = "".join(
+        c
+        for c in unicodedata.normalize("NFD", texto)
+        if unicodedata.category(c) != "Mn"
+    )
+
+    texto = " ".join(texto.split())
+
+    return texto
+
+
 # =========================================================
 # LEER EXCEL
 # =========================================================
 
 def leer_excel(source):
+
     if source is None:
         raise Exception("No se seleccionó archivo.")
+
     try:
+
         if isinstance(source, (str, Path)):
+
             path = Path(source)
+
             if not path.exists():
                 raise Exception(f"No existe:\n{path}")
-            df = pd.read_excel(path, keep_default_na=False, engine="openpyxl")
+
+            df = pd.read_excel(
+                path,
+                keep_default_na=False,
+                engine="openpyxl"
+            )
+
         else:
+
             if hasattr(source, "seek"):
                 source.seek(0)
-            df = pd.read_excel(source, keep_default_na=False, engine="openpyxl")
+
+            df = pd.read_excel(
+                source,
+                keep_default_na=False,
+                engine="openpyxl"
+            )
+
     except Exception as e:
-        raise Exception(f"No se pudo leer Excel:\n{e}")
+        raise Exception(f"No se pudo leer el archivo Excel:\n{e}")
+
+    # Normalizar nombres de columnas
     df.columns = [clean_col(c) for c in df.columns]
+
+    # Eliminar NaN
     df = df.where(pd.notnull(df), "")
+
     return df.astype(str)
 
 
@@ -125,95 +140,124 @@ def leer_excel(source):
 def to_float(x):
 
     try:
-
         return float(
             str(x)
+            .strip()
             .replace(",", ".")
         )
 
-    except:
-
+    except (ValueError, TypeError):
         return 0.0
+
+
+def to_int(x):
+
+    try:
+        return int(
+            float(
+                str(x)
+                .strip()
+                .replace(",", ".")
+            )
+        )
+
+    except (ValueError, TypeError):
+        return 0
+
 
 def normalizar_perfil(p):
 
-    p = str(p).lower().strip()
+    p = normalizar_texto(p)
 
     mapa = {
+        "educadora social": "educacion social",
+        "educador social": "educacion social",
+        "educacion social": "educacion social",
 
-        "educadora social":
-            "educación social",
+        "trabajadora social": "trabajo social",
+        "trabajador social": "trabajo social",
+        "trabajo social": "trabajo social",
 
-        "educador social":
-            "educación social",
-
-        "trabajadora social":
-            "trabajo social",
-
-        "trabajador social":
-            "trabajo social",
-
-        "criminóloga":
-            "criminología",
-
-        "criminologo":
-            "criminología"
+        "criminologa": "criminologia",
+        "criminologo": "criminologia",
+        "criminologia": "criminologia",
     }
 
     return mapa.get(p, p)
 
+
 def parse_profiles(x):
+    """
+    Si la celda está vacía o dice 'todos',
+    la plaza admite cualquier perfil.
+    """
 
-    x = str(x).lower().strip()
+    x = normalizar_texto(x)
 
-    if x in ("", "todos", "all"):
+    if x in ("", "todos", "todo", "all", "cualquiera"):
         return None
 
+    # Permite:
+    # trabajo social | educación social
+    # trabajo social; educación social
+    perfiles = re.split(r"[|;,]", x)
+
     return {
-
         normalizar_perfil(p)
-
-        for p in x.split("|")
+        for p in perfiles
+        if str(p).strip()
     }
+
 
 def normalize_shift(x):
 
-    x = str(x).lower().strip()
+    x = normalizar_texto(x)
 
-    if x in ("", "any", "cualquiera"):
+    if x in (
+        "",
+        "any",
+        "cualquiera",
+        "indiferente",
+        "ambos"
+    ):
         return "any"
 
     if x in (
         "m",
-        "mañana",
         "manana",
         "morning"
     ):
         return "morning"
 
-    return "afternoon"
+    if x in (
+        "t",
+        "tarde",
+        "afternoon"
+    ):
+        return "afternoon"
+
+    # Si hay un valor desconocido, no restringimos el turno.
+    return "any"
+
 
 # =========================================================
-# VALIDAR COLUMNAS
+# VALIDACIÓN DE COLUMNAS
 # =========================================================
 
 def validar_columnas(df, cols, nombre):
 
-    faltan = []
-
-    for c in cols:
-
-        if c not in df.columns:
-            faltan.append(c)
+    faltan = [
+        c for c in cols
+        if c not in df.columns
+    ]
 
     if faltan:
 
         raise Exception(
-
-            f"Faltan columnas en {nombre}:\n\n"
-
-            + "\n".join(faltan)
+            f"Faltan columnas obligatorias en {nombre}:\n\n"
+            + "\n".join(f"• {c}" for c in faltan)
         )
+
 
 # =========================================================
 # PREPARAR PLAZAS
@@ -222,17 +266,14 @@ def validar_columnas(df, cols, nombre):
 def preparar_plazas(df):
 
     validar_columnas(
-
         df,
-
         [
             COL["pid"],
             COL["pname"],
             COL["cm"],
-            COL["ct"]
+            COL["ct"],
         ],
-
-        "PLAZAS"
+        "el archivo de PLAZAS"
     )
 
     plazas = {}
@@ -241,99 +282,103 @@ def preparar_plazas(df):
 
     for _, r in df.iterrows():
 
-        pid = str(
-            r[COL["pid"]]
-        ).strip().lower()
+        pid_original = str(r[COL["pid"]]).strip()
 
-        nombre = str(
-            r[COL["pname"]]
-        ).strip().lower()
-
-        if not pid:
+        if not pid_original:
             continue
 
-        try:
-            cm = int(
-                float(
-                    str(r[COL["cm"]])
-                    .replace(",", ".")
-                )
-            )
-        except:
-            cm = 0
+        pid = normalizar_texto(pid_original)
 
-        try:
-            ct = int(
-                float(
-                    str(r[COL["ct"]])
-                    .replace(",", ".")
-                )
-            )
-        except:
-            ct = 0
+        nombre_original = str(
+            r[COL["pname"]]
+        ).strip()
+
+        nombre_normalizado = normalizar_texto(
+            nombre_original
+        )
+
+        cm = to_int(r[COL["cm"]])
+        ct = to_int(r[COL["ct"]])
+
+        # Evitar capacidades negativas
+        cm = max(cm, 0)
+        ct = max(ct, 0)
 
         profiles = None
 
         if COL["profiles"] in df.columns:
-
             profiles = parse_profiles(
                 r[COL["profiles"]]
             )
 
         plazas[pid] = {
-
             "id": pid,
-
-            "nombre":
-                str(r[COL["pname"]]),
-
-            "cm_total":
-                cm,
-
-            "ct_total":
-                ct,
-
-            "profiles":
-                profiles
+            "id_original": pid_original,
+            "nombre": nombre_original,
+            "cm_total": cm,
+            "ct_total": ct,
+            "profiles": profiles,
         }
 
         ocupacion[pid] = {
-
             "cm": 0,
-            "ct": 0
+            "ct": 0,
         }
 
-        alias[nombre] = pid
+        # La preferencia puede contener el ID...
+        alias[pid] = pid
+
+        # ...o el nombre de la plaza.
+        if nombre_normalizado:
+            alias[nombre_normalizado] = pid
+
+    if not plazas:
+        raise Exception(
+            "No se ha encontrado ninguna plaza válida "
+            "en el archivo de plazas."
+        )
 
     return plazas, alias, ocupacion
+
 
 # =========================================================
 # DETECTAR PREFERENCIAS
 # =========================================================
 
 def detectar_preferencias(df):
+    """
+    Detecta automáticamente:
+
+    preferencia1
+    preferencia2
+    preferencia3
+    ...
+    preferencia20
+
+    No existe límite de 3 preferencias.
+    """
 
     prefs = []
 
-    for c in df.columns:
+    for columna in df.columns:
 
-        c = clean_col(c)
+        c = clean_col(columna)
 
-        m = re.match(
-            r"preferencia([0-9]+)$",
+        m = re.fullmatch(
+            r"preferencia([0-9]+)",
             c
         )
 
         if m:
-
             prefs.append(
                 int(m.group(1))
             )
 
     return sorted(set(prefs))
 
+
 # =========================================================
-# ASIGNAR
+# ASIGNACIÓN
 # =========================================================
 
 def asignar(
@@ -344,328 +389,505 @@ def asignar(
     prefer_morning=True
 ):
 
+    # Perfil es opcional.
+    columnas_obligatorias = [
+        COL["id"],
+        COL["apellido"],
+        COL["nombre"],
+        COL["nota"],
+    ]
+
     validar_columnas(
-
         df,
-
-        [
-            COL["id"],
-            COL["apellido"],
-            COL["nombre"],
-            COL["perfil"],
-            COL["nota"]
-        ],
-
-        "ALUMNOS"
+        columnas_obligatorias,
+        "el archivo de ALUMNOS"
     )
+
+    # Si no existe perfil, lo creamos vacío.
+    if COL["perfil"] not in df.columns:
+        df[COL["perfil"]] = ""
 
     preferencias = detectar_preferencias(df)
 
     if not preferencias:
-
         raise Exception(
-            "No existen columnas preferencia1, preferencia2..."
+            "No se han encontrado preferencias.\n\n"
+            "Las columnas deben llamarse, por ejemplo:\n"
+            "Preferencia 1\n"
+            "Preferencia 2\n"
+            "Preferencia 3\n"
+            "..."
         )
 
     # =====================================================
-    # ORDEN REAL POR NOTA
+    # PRIORIDAD: NOTA DESCENDENTE
     # =====================================================
 
     df["_nota"] = df[
         COL["nota"]
     ].apply(to_float)
 
+    # mergesort mantiene un orden estable.
     df = df.sort_values(
-
         by=[
             "_nota",
             COL["apellido"],
-            COL["nombre"]
+            COL["nombre"],
         ],
+        ascending=[
+            False,
+            True,
+            True,
+        ],
+        kind="mergesort"
+    ).reset_index(drop=True)
 
-        ascending=[False, True, True]
-    )
-
-    out = []
+    resultados = []
 
     # =====================================================
-    # RECORRER ALUMNOS
+    # ALUMNO POR ALUMNO
     # =====================================================
 
-    for _, s in df.iterrows():
+    for _, alumno in df.iterrows():
 
         perfil = normalizar_perfil(
-            s[COL["perfil"]]
+            alumno.get(COL["perfil"], "")
         )
 
         asignado = False
+        motivo_final = "sin preferencia disponible"
 
-        motivo = ""
-
-        # =================================================
-        # RECORRER PREFERENCIAS EN ORDEN
-        # =================================================
+        # ===============================================
+        # PREFERENCIAS EN ORDEN: 1, 2, 3, 4...
+        # ===============================================
 
         for i in preferencias:
 
             pref_col = f"preferencia{i}"
             turno_col = f"preferencia{i}turno"
 
-            pref = str(
-                s.get(pref_col, "")
-            ).lower().strip()
-
-            turno = normalize_shift(
-                s.get(turno_col, "any")
+            valor_preferencia = alumno.get(
+                pref_col,
+                ""
             )
 
-            if not pref:
+            pref_normalizada = normalizar_texto(
+                valor_preferencia
+            )
+
+            if not pref_normalizada:
                 continue
 
-            # nombre -> id
+            turno = normalize_shift(
+                alumno.get(
+                    turno_col,
+                    "any"
+                )
+            )
 
-            if pref in alias:
-                pref = alias[pref]
+            # ===========================================
+            # LOCALIZAR PLAZA
+            # ===========================================
 
-            if pref not in plazas:
+            if pref_normalizada in alias:
+                pid = alias[pref_normalizada]
 
-                motivo = f"pref{i} no existe"
+            elif pref_normalizada in plazas:
+                pid = pref_normalizada
 
+            else:
+                motivo_final = (
+                    f"Preferencia {i}: plaza no encontrada "
+                    f"({valor_preferencia})"
+                )
                 continue
 
-            plaza = plazas[pref]
+            plaza = plazas[pid]
 
-            # =================================================
-            # VALIDAR PERFIL
-            # =================================================
+            # ===========================================
+            # PERFIL
+            # ===========================================
 
-            allowed = plaza["profiles"]
+            perfiles_admitidos = plaza["profiles"]
 
             if (
-                allowed is not None
-                and perfil not in allowed
+                perfiles_admitidos is not None
+                and perfil not in perfiles_admitidos
             ):
-
-                motivo = f"pref{i} perfil incompatible"
-
+                motivo_final = (
+                    f"Preferencia {i}: perfil incompatible"
+                )
                 continue
 
-            # =================================================
+            # ===========================================
             # TURNOS
-            # =================================================
+            # ===========================================
 
-            if turno == "any":
+            if turno == "morning":
 
-                orden = (
+                orden_turnos = ["cm"]
 
-                    ["cm", "ct"]
+            elif turno == "afternoon":
 
-                    if prefer_morning
+                orden_turnos = ["ct"]
 
-                    else ["ct", "cm"]
-                )
+            elif prefer_morning:
 
-            elif turno == "morning":
-
-                orden = ["cm"]
+                orden_turnos = ["cm", "ct"]
 
             else:
 
-                orden = ["ct"]
+                orden_turnos = ["ct", "cm"]
 
-            # =================================================
-            # INTENTAR ASIGNAR
-            # =================================================
+            turno_asignado = None
 
-            asignado_turno = None
+            # ===========================================
+            # COMPROBAR CAPACIDAD
+            # ===========================================
 
-            for o in orden:
+            for codigo_turno in orden_turnos:
 
-                capacidad_total = (
+                if codigo_turno == "cm":
+                    capacidad = plaza["cm_total"]
 
-                    plaza["cm_total"]
+                else:
+                    capacidad = plaza["ct_total"]
 
-                    if o == "cm"
+                ocupadas = ocupacion[pid][
+                    codigo_turno
+                ]
 
-                    else plaza["ct_total"]
+                disponibles = (
+                    capacidad - ocupadas
                 )
 
-                ocupadas = ocupacion[pref][o]
+                if disponibles > 0:
 
-                libres = (
-                    capacidad_total
-                    - ocupadas
-                )
-
-                if libres > 0:
-
-                    ocupacion[pref][o] += 1
+                    # MUY IMPORTANTE:
+                    # ocupamos exactamente UNA plaza.
+                    ocupacion[pid][
+                        codigo_turno
+                    ] += 1
 
                     asignado = True
 
-                    asignado_turno = (
-
-                        "m"
-
-                        if o == "cm"
-
-                        else "t"
+                    turno_asignado = (
+                        "Mañana"
+                        if codigo_turno == "cm"
+                        else "Tarde"
                     )
 
                     break
 
+            # ===========================================
+            # PLAZA CONSEGUIDA
+            # ===========================================
+
             if asignado:
 
-                out.append({
-
-                    "ID":
-                        s[COL["id"]],
-
-                    "Apellido":
-                        s[COL["apellido"]],
-
-                    "Nombre":
-                        s[COL["nombre"]],
-
-                    "Perfil":
-                        perfil,
-
-                    "Nota":
-                        s[COL["nota"]],
-
-                    "Empresa":
-                        plaza["nombre"],
-
-                    "Turno":
-                        asignado_turno,
-
-                    "Preferencia":
-                        i,
-
-                    "Estado":
-                        "asignado"
+                resultados.append({
+                    "ID": alumno[COL["id"]],
+                    "Apellido": alumno[COL["apellido"]],
+                    "Nombre": alumno[COL["nombre"]],
+                    "Perfil": alumno.get(COL["perfil"], ""),
+                    "Nota": alumno[COL["nota"]],
+                    "Empresa": plaza["nombre"],
+                    "Turno": turno_asignado,
+                    "Preferencia": i,
+                    "Estado": "asignado",
                 })
 
+                # IMPORTANTÍSIMO:
+                # al conseguir una plaza dejamos de
+                # revisar preferencias de este alumno.
                 break
 
-            else:
+            motivo_final = (
+                f"Preferencia {i}: sin plazas disponibles"
+            )
 
-                motivo = f"pref{i} sin plazas"
-
-        # =====================================================
-        # SIN ASIGNAR
-        # =====================================================
+        # ===============================================
+        # SIN PLAZA
+        # ===============================================
 
         if not asignado:
 
-            out.append({
-
-                "ID":
-                    s[COL["id"]],
-
-                "Apellido":
-                    s[COL["apellido"]],
-
-                "Nombre":
-                    s[COL["nombre"]],
-
-                "Perfil":
-                    perfil,
-
-                "Nota":
-                    s[COL["nota"]],
-
-                "Empresa":
-                    "",
-
-                "Turno":
-                    "",
-
-                "Preferencia":
-                    "",
-
-                "Estado":
-                    motivo or "sin plaza"
+            resultados.append({
+                "ID": alumno[COL["id"]],
+                "Apellido": alumno[COL["apellido"]],
+                "Nombre": alumno[COL["nombre"]],
+                "Perfil": alumno.get(COL["perfil"], ""),
+                "Nota": alumno[COL["nota"]],
+                "Empresa": "",
+                "Turno": "",
+                "Preferencia": "",
+                "Estado": motivo_final,
             })
 
-    return pd.DataFrame(out)
+    return pd.DataFrame(resultados)
+
+
+# =========================================================
+# GENERAR EXCEL
+# =========================================================
+
+def generar_excel(resultado):
+
+    from openpyxl.styles import PatternFill, Font, Alignment
+
+    output = BytesIO()
+
+    with pd.ExcelWriter(
+        output,
+        engine="openpyxl"
+    ) as writer:
+
+        resultado.to_excel(
+            writer,
+            sheet_name="Asignaciones",
+            index=False
+        )
+
+        ws = writer.book["Asignaciones"]
+
+        # Colores
+        fill_header = PatternFill(
+            "solid",
+            fgColor="1F4E78"
+        )
+
+        fill_ok = PatternFill(
+            "solid",
+            fgColor="C6EFCE"
+        )
+
+        fill_warn = PatternFill(
+            "solid",
+            fgColor="FFF2CC"
+        )
+
+        fill_bad = PatternFill(
+            "solid",
+            fgColor="F8D7DA"
+        )
+
+        # Cabecera
+        for cell in ws[1]:
+
+            cell.font = Font(
+                bold=True,
+                color="FFFFFF"
+            )
+
+            cell.fill = fill_header
+
+            cell.alignment = Alignment(
+                horizontal="center"
+            )
+
+        # Filas
+        for row in ws.iter_rows(min_row=2):
+
+            estado = row[-1].value
+            pref = row[-2].value
+
+            if (
+                estado == "asignado"
+                and pref == 1
+            ):
+                fill = fill_ok
+
+            elif estado == "asignado":
+                fill = fill_warn
+
+            else:
+                fill = fill_bad
+
+            for cell in row:
+                cell.fill = fill
+                cell.font = Font(
+                    color="000000"
+                )
+
+        # Anchura automática
+        for cells in ws.columns:
+
+            ancho = max(
+                len(str(c.value or ""))
+                for c in cells
+            ) + 2
+
+            ws.column_dimensions[
+                cells[0].column_letter
+            ].width = min(
+                max(ancho, 10),
+                45
+            )
+
+        ws.freeze_panes = "A2"
+        ws.auto_filter.ref = ws.dimensions
+
+    return output.getvalue()
 
 
 # =========================================================
 # INTERFAZ STREAMLIT
 # =========================================================
-st.set_page_config(page_title="PRAXIS", page_icon="🎓", layout="wide")
+
+st.set_page_config(
+    page_title="PRAXIS",
+    page_icon="🎓",
+    layout="wide"
+)
 
 st.title("🎓 PRAXIS")
-st.subheader("Sistema inteligente de asignación de prácticas")
-st.caption("Desarrollado por Diego J. Maldonado Guzmán")
+st.subheader(
+    "Sistema inteligente de asignación de prácticas"
+)
+
+st.caption(
+    "Asignación por prioridad académica, preferencias, "
+    "turnos y perfiles compatibles."
+)
+
+
+# =========================================================
+# SIDEBAR
+# =========================================================
 
 with st.sidebar:
-    st.header("Configuración")
-    alumnos = st.file_uploader("Archivo de alumnos", type=["xlsx"])
-    plazas_file = st.file_uploader("Archivo de plazas", type=["xlsx"])
-    prefer_morning = st.checkbox("Preferir turno de mañana", value=True)
+
+    st.header("⚙️ Configuración")
+
+    alumnos = st.file_uploader(
+        "📄 Archivo de alumnos",
+        type=["xlsx"],
+        key="archivo_alumnos"
+    )
+
+    plazas_file = st.file_uploader(
+        "🏢 Archivo de plazas",
+        type=["xlsx"],
+        key="archivo_plazas"
+    )
+
+    st.divider()
+
+    prefer_morning = st.checkbox(
+        "Preferir turno de mañana cuando sea indiferente",
+        value=True
+    )
+
     ejecutar = st.button(
         "▶ Ejecutar asignación",
         type="primary",
         use_container_width=True,
-        disabled=not (alumnos and plazas_file),
+        disabled=not (
+            alumnos is not None
+            and plazas_file is not None
+        ),
     )
+
+    st.divider()
+
+    st.caption(
+        "Los alumnos se procesan de mayor a menor "
+        "nota media."
+    )
+
+
+# =========================================================
+# SESSION STATE
+# =========================================================
 
 if "resultado" not in st.session_state:
     st.session_state.resultado = None
+
 if "excel" not in st.session_state:
     st.session_state.excel = None
 
+
+# =========================================================
+# EJECUTAR
+# =========================================================
+
 if ejecutar:
+
     try:
-        with st.spinner("Calculando asignaciones..."):
-            df_s = leer_excel(alumnos)
-            df_p = leer_excel(plazas_file)
-            plazas, alias, ocupacion = preparar_plazas(df_p)
-            resultado = asignar(df_s.copy(), plazas, alias, ocupacion, prefer_morning)
 
-            output = BytesIO()
-            from openpyxl.styles import PatternFill, Font
-            with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                resultado.to_excel(writer, sheet_name="Asignaciones", index=False)
-                ws = writer.book["Asignaciones"]
-                fill_ok = PatternFill("solid", fgColor="C6EFCE")
-                fill_warn = PatternFill("solid", fgColor="FFF2CC")
-                fill_bad = PatternFill("solid", fgColor="F8D7DA")
-                for cell in ws[1]:
-                    cell.font = Font(bold=True)
-                for row in ws.iter_rows(min_row=2):
-                    estado, pref = row[-1].value, row[-2].value
-                    fill = fill_ok if estado == "asignado" and pref == 1 else (
-                        fill_warn if estado == "asignado" else fill_bad
-                    )
-                    for cell in row:
-                        cell.fill = fill
-                for cells in ws.columns:
-                    ancho = max(len(str(c.value or "")) for c in cells) + 2
-                    ws.column_dimensions[cells[0].column_letter].width = min(max(ancho, 10), 45)
+        with st.spinner(
+            "Calculando asignaciones..."
+        ):
 
-            st.session_state.resultado = resultado
-            st.session_state.excel = output.getvalue()
-        st.success("Asignación completada.")
+            df_alumnos = leer_excel(
+                alumnos
+            )
+
+            df_plazas = leer_excel(
+                plazas_file
+            )
+
+            plazas, alias, ocupacion = (
+                preparar_plazas(
+                    df_plazas
+                )
+            )
+
+            resultado = asignar(
+                df_alumnos.copy(),
+                plazas,
+                alias,
+                ocupacion,
+                prefer_morning
+            )
+
+            excel = generar_excel(
+                resultado
+            )
+
+            st.session_state.resultado = (
+                resultado
+            )
+
+            st.session_state.excel = excel
+
+        st.success(
+            "✅ Asignación completada correctamente."
+        )
+
     except Exception as e:
+
         st.session_state.resultado = None
         st.session_state.excel = None
-        st.error(f"Error: {e}")
+
+        st.error(
+            f"❌ Error durante la asignación:\n\n{e}"
+        )
+
+
+# =========================================================
+# RESULTADOS
+# =========================================================
 
 resultado = st.session_state.resultado
 
 if resultado is not None:
+
     total = len(resultado)
 
     asignados = int(
-        (resultado["Estado"] == "asignado").sum()
+        (
+            resultado["Estado"]
+            == "asignado"
+        ).sum()
     )
 
     primera = int(
         (
-            (resultado["Estado"] == "asignado")
+            (
+                resultado["Estado"]
+                == "asignado"
+            )
             &
             (
                 pd.to_numeric(
@@ -676,34 +898,56 @@ if resultado is not None:
         ).sum()
     )
 
-    # ==========================================
+    sin_plaza = total - asignados
+
+    # =====================================================
     # MÉTRICAS
-    # ==========================================
+    # =====================================================
+
+    st.subheader("📊 Resumen de la asignación")
 
     a, b, c, d = st.columns(4)
 
-    a.metric("Alumnos", total)
-    b.metric("Asignados", asignados)
-    c.metric("Sin plaza", total - asignados)
-    d.metric("1.ª preferencia", primera)
+    a.metric(
+        "👥 Alumnos",
+        total
+    )
 
-    # ==========================================
-    # COLORES DE LA TABLA
-    # ==========================================
+    b.metric(
+        "✅ Asignados",
+        asignados
+    )
+
+    c.metric(
+        "⚠️ Sin plaza",
+        sin_plaza
+    )
+
+    d.metric(
+        "🥇 1.ª preferencia",
+        primera
+    )
+
+    # =====================================================
+    # TABLA
+    # =====================================================
+
+    st.subheader("📋 Resultados")
 
     def colorear(row):
 
-        # Primera preferencia → VERDE
         if (
             row["Estado"] == "asignado"
-            and str(row["Preferencia"]) in ("1", "1.0")
+            and str(
+                row["Preferencia"]
+            ) in ("1", "1.0")
         ):
+
             estilo = (
                 "background-color: #d4f4dd; "
                 "color: #000000;"
             )
 
-        # Otras preferencias → AMARILLO
         elif row["Estado"] == "asignado":
 
             estilo = (
@@ -711,7 +955,6 @@ if resultado is not None:
                 "color: #000000;"
             )
 
-        # Sin plaza → ROJO
         else:
 
             estilo = (
@@ -719,17 +962,15 @@ if resultado is not None:
                 "color: #000000;"
             )
 
-        return [estilo] * len(row)
+        return [
+            estilo
+        ] * len(row)
 
-    # ==========================================
-    # RESULTADOS
-    # ==========================================
-
-    st.subheader("Resultados")
-
-    tabla_estilizada = resultado.style.apply(
-        colorear,
-        axis=1
+    tabla_estilizada = (
+        resultado.style.apply(
+            colorear,
+            axis=1
+        )
     )
 
     st.dataframe(
@@ -739,14 +980,48 @@ if resultado is not None:
         height=520
     )
 
-    # ==========================================
+    st.caption(
+        "🟢 Verde: primera preferencia · "
+        "🟡 Amarillo: otra preferencia · "
+        "🔴 Rojo: sin plaza"
+    )
+
+    # =====================================================
     # DESCARGAR EXCEL
-    # ==========================================
+    # =====================================================
 
     st.download_button(
         "📥 Descargar asignaciones.xlsx",
-        st.session_state.excel,
-        "asignaciones.xlsx",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        type="primary"
+        data=st.session_state.excel,
+        file_name="asignaciones.xlsx",
+        mime=(
+            "application/vnd.openxmlformats-"
+            "officedocument.spreadsheetml.sheet"
+        ),
+        type="primary",
+        use_container_width=False
     )
+
+
+# =========================================================
+# CRÉDITOS
+# =========================================================
+
+st.markdown(
+    """
+    <div style="
+        margin-top: 45px;
+        padding: 20px;
+        border-top: 1px solid rgba(128,128,128,0.35);
+        text-align: center;
+        font-size: 14px;
+        line-height: 1.7;
+    ">
+        <strong>Desarrollado por:</strong><br>
+        <strong>Diego J. Maldonado Guzmán</strong><br>
+        Profesor del Área de Derecho Penal de la Universidad de Málaga<br>
+        Investigador del Instituto Andaluz Interuniversitario de Criminología – Sección Málaga
+    </div>
+    """,
+    unsafe_allow_html=True
+)
