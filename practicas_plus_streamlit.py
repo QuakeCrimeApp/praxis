@@ -2,26 +2,39 @@
 # -*- coding: utf-8 -*-
 
 """
-═══════════════════════════════════════════════
- PRÁCTICA+
- Sistema inteligente de asignación de prácticas
-═══════════════════════════════════════════════
+PRÁCTICA+
+Sistema inteligente de asignación de prácticas
+"""
 
-✔ SOLO Excel (.xlsx)
-✔ Prioridad REAL por nota
-✔ Preferencias ilimitadas
-✔ Compatible con nombres o IDs
-✔ Turnos mañana/tarde
-✔ Perfiles compatibles
-✔ GUI visual
-✔ Exportación Excel
-✔ Corrección definitiva preferencias
+import streamlit as st
+import pandas as pd
+
+# ==============================
+# TODO TU PROGRAMA
+# ==============================
+
+# ...
+# ...
+# ...
+
+st.download_button(
+    "📥 Descargar asignaciones.xlsx",
+    st.session_state.excel,
+    "asignaciones.xlsx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    type="primary"
+)
+
+# ==============================
+# CRÉDITOS
+# ==============================
 
 st.markdown("""
 <div style="
-    margin-top: 25px;
+    margin-top: 35px;
     padding: 15px 20px;
     border-top: 1px solid #cccccc;
+    text-align: center;
     font-size: 14px;
     line-height: 1.6;
 ">
@@ -31,8 +44,6 @@ st.markdown("""
     Investigador del Instituto Andaluz Interuniversitario de Criminología – Sección Málaga
 </div>
 """, unsafe_allow_html=True)
-
-"""
 
 import os
 import re
